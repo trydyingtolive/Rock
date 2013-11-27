@@ -634,6 +634,16 @@ namespace RockWeb.Blocks.Reporting
                     return;
                 }
 
+                var personService = new PersonService();
+                var qry = personService.Queryable().Select( a =>
+                    new
+                    {
+                        Person = a,
+                        PersonAttributeValues = a.RowAttributeValues
+                    } );
+
+                var lst = qry.Take(10).ToList();
+
                 Type entityType = EntityTypeCache.Read( report.EntityTypeId.Value ).GetEntityType();
 
                 List<EntityField> entityFields = Rock.Reporting.EntityHelper.GetEntityFields( entityType );

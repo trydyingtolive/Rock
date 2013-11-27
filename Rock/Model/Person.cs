@@ -510,6 +510,9 @@ namespace Rock.Model
         }
         private ICollection<Attendance> _attendances;
 
+
+        
+
         /// <summary>
         /// Gets or sets the <see cref="Rock.Model.DefinedValue"/> representing the Person's marital status.
         /// </summary>
@@ -902,7 +905,21 @@ namespace Rock.Model
 
         #endregion
 
+        #region Row Attribute Values
+        
+        [ReadOnly( true )]
+        public virtual ICollection<PersonAttributeValue> RowAttributeValues { get; set; }
+        
+        #endregion
+
     }
+
+    [Table( "v_personattributevalue" )]
+    public class PersonAttributeValue : AttributeValue
+    {
+        public int PersonId { get; set; }
+    }
+
 
     #region Entity Configuration
 
@@ -925,6 +942,10 @@ namespace Rock.Model
             this.HasOptional( p => p.TitleValue ).WithMany().HasForeignKey( p => p.TitleValueId ).WillCascadeOnDelete( false );
             this.HasOptional( p => p.Photo ).WithMany().HasForeignKey( p => p.PhotoId ).WillCascadeOnDelete( false );
             this.HasOptional( p => p.GivingGroup ).WithMany().HasForeignKey( p => p.GivingGroupId ).WillCascadeOnDelete( false );
+
+
+
+            this.HasMany( p => p.RowAttributeValues ).WithOptional().HasForeignKey( n => n.PersonId );
         }
     }
 
