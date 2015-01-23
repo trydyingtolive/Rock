@@ -32,6 +32,9 @@ using Rock.Store;
 using System.Text;
 using Rock.Utility;
 using System.Net;
+using System.IO.Compression;
+using Microsoft.Web.XmlTransform;
+
 
 namespace RockWeb.Blocks.Store
 {
@@ -52,6 +55,7 @@ namespace RockWeb.Blocks.Store
         private string _updateMessage = "Login below with your Rock Store account to upgrade this package.";
         private string _installPreviousPurchase = "Login below with your Rock Store account to install this previously purchased package.";
 
+        const string _xdtExtension = ".rock.xdt";
         #endregion
 
         #region Properties
@@ -145,7 +149,7 @@ namespace RockWeb.Blocks.Store
                     lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Payment Error</strong> An error occurred will processing the credit card on file for your organization. The error was: {0}. Please update your card's information from your <a href='{1}'>Account Page</a>.</div>", installResponse.Message, ResolveRockUrl("~/RockShop/Account") );
                     break;
                 case PurchaseResult.Success:
-                    ProcessInstall(installResponse.PackageInstallSteps);
+                    ProcessInstall( installResponse );
                     break;
             }
         }
@@ -154,27 +158,190 @@ namespace RockWeb.Blocks.Store
 
         #region Methods
 
-        private void ProcessInstall( List<PackageInstallStep> installSteps )
+        private void ProcessInstall( PurchaseResponse purchaseResponse )
         {
-            foreach ( var installStep in installSteps )
-            {
-                string sourceFile = installStep.InstallPackageUrl.Replace( "~", "http://www.rockrms.com" );  // todo remove before flight
-                string destinationFile = Server.MapPath( string.Format( "~/App_Data/{0}.zip", installStep.PackageId.ToString() ) );
 
-                // download file
-                try
+            if ( purchaseResponse.PackageInstallSteps != null )
+            {
+
+                foreach ( var installStep in purchaseResponse.PackageInstallSteps )
                 {
-                    WebClient wc = new WebClient();
-                    wc.DownloadFile( sourceFile, destinationFile );
-                }
-                catch ( Exception ex )
-                {
-                    lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Downloading Package</strong> An error occurred will while downloading package from the store. Please try again later.</div>", ex.Message );
-                    return;
+                    string appRoot = Server.MapPath( "~/" );
+                    string rockShopWorkingDir = appRoot + "App_Data/RockShop";
+                    string packageDirectory = string.Format( "{0}/{1} - {2}", rockShopWorkingDir, purchaseResponse.PackageId, purchaseResponse.PackageName );
+                    string sourceFile = installStep.InstallPackageUrl; 
+                    string destinationFile = string.Format("{0}/{1} - {2}.plugin", packageDirectory, installStep.VersionId, installStep.VersionLabel);
+
+                    // check that the RockShop directory exists
+                    if ( !Directory.Exists( rockShopWorkingDir ) )
+                    {
+                        Directory.CreateDirectory( rockShopWorkingDir );
+                    }
+
+                    // create package directory
+                    if ( !Directory.Exists( packageDirectory ) )
+                    {
+                        Directory.CreateDirectory( packageDirectory );
+                    }
+
+                    // download file
+                    try
+                    {
+                        WebClient wc = new WebClient();
+                        wc.DownloadFile( sourceFile, destinationFile );
+                    }
+                    catch ( Exception ex )
+                    {
+                        CleanUpPackage( destinationFile );
+                        lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Downloading Package</strong> An error occurred while downloading package from the store. Please try again later. <br><em>Error: {0}</em></div>", ex.Message );
+                        return;
+                    }
+
+                   // process zip folder
+                    try
+                    {
+                        using ( ZipArchive packageZip = ZipFile.OpenRead( destinationFile ) )
+                        {
+                            // unzip content folder and process xdts
+                            foreach ( ZipArchiveEntry entry in packageZip.Entries.Where(e => e.FullName.StartsWith("content/")) )
+                            {
+                               if ( entry.FullName.EndsWith( _xdtExtension, StringComparison.OrdinalIgnoreCase ) )
+                                {
+                                    // process xdt
+                                    string filename = entry.FullName.Replace( "content/", "" );
+                                    string transformTargetFile = appRoot + filename.Substring( 0, filename.LastIndexOf( _xdtExtension ) );
+
+                                    // process transform
+                                    using ( XmlTransformableDocument document = new XmlTransformableDocument() )
+                                    {
+                                        document.PreserveWhitespace = true;
+                                        document.Load( transformTargetFile );
+
+                                        using ( XmlTransformation transform = new XmlTransformation( entry.Open(), null))
+                                        {
+                                            if ( transform.Apply( document ) )
+                                            {
+                                                document.Save( transformTargetFile );
+                                            }
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // process all content files
+                                    string fullpath = Path.Combine( appRoot, entry.FullName.Replace("content/", "") );
+                                    string directory = Path.GetDirectoryName( fullpath ).Replace("content/", "");
+
+                                    if ( !Directory.Exists( directory ) )
+                                    {
+                                        Directory.CreateDirectory( directory );
+                                    }
+
+                                    entry.ExtractToFile( fullpath, true );
+                                }
+                            }
+
+                            // process install.sql
+                            try
+                            {
+                                var sqlInstallEntry = packageZip.Entries.Where( e => e.FullName == "install/run.sql" ).FirstOrDefault();
+                                if (sqlInstallEntry != null) {
+                                    string sqlScript = System.Text.Encoding.Default.GetString(sqlInstallEntry.Open().ReadBytesToEnd());
+
+                                    if ( !string.IsNullOrWhiteSpace( sqlScript ) )
+                                    {
+                                        using ( var context = new RockContext() )
+                                        {
+                                            context.Database.ExecuteSqlCommand( sqlScript );
+                                        }
+                                    }
+                                }
+                            }
+                            catch ( Exception ex )
+                            {
+                                lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Updating Database</strong> An error occurred while updating the database. <br><em>Error: {0}</em></div>", ex.Message );
+                                return;
+                            }
+
+                            // process deletefile.lst
+                            try
+                            {
+                                var deleteListEntry = packageZip.Entries.Where( e => e.FullName == "install/deletefile.lst" ).FirstOrDefault();
+                                if ( deleteListEntry != null )
+                                {
+                                
+                                    string deleteList = System.Text.Encoding.Default.GetString( deleteListEntry.Open().ReadBytesToEnd() );
+
+                                    string[] itemsToDelete = deleteList.Split( new string[] { Environment.NewLine }, StringSplitOptions.None );
+
+                                    foreach ( string deleteItem in itemsToDelete )
+                                    {
+                                        if ( !string.IsNullOrWhiteSpace( deleteItem ) )
+                                        {
+                                            string deleteItemFullPath = appRoot + deleteItem;
+
+                                            if ( Directory.Exists( deleteItemFullPath ) )
+                                            {
+                                                Directory.Delete( deleteItemFullPath, true);
+                                            }
+
+                                            if ( File.Exists( deleteItemFullPath ) )
+                                            {
+                                                File.Delete( deleteItemFullPath );
+                                            }
+                                        }
+                                    }
+                                
+                                }
+                            }
+                            catch ( Exception ex )
+                            {
+                                lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Modifing Files</strong> An error occurred while modifing files. <br><em>Error: {0}</em></div>", ex.Message );
+                                return;
+                            }
+                            
+                        }
+                    }
+                    catch ( Exception ex )
+                    {
+                        lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Extracting Package</strong> An error occurred while extracting the contents of the package. <br><em>Error: {0}</em></div>", ex.Message );
+                        return;
+                    }
+
+                    // update package install json file
+                    InstalledPackageService.SaveInstall( purchaseResponse.PackageId, purchaseResponse.PackageName, installStep.VersionId, installStep.VersionLabel, purchaseResponse.VendorId, purchaseResponse.VendorName, purchaseResponse.InstalledBy );
+                
+                    // Clear all cached items
+                    Rock.Web.Cache.RockMemoryCache.Clear();
+
+                    // Clear the static object that contains all auth rules (so that it will be refreshed)
+                    Rock.Security.Authorization.Flush();
+
+                    // show result message
+                    lMessages.Text = string.Format( "<div class='alert alert-success margin-t-md'><strong>Package Installed</strong><p>{0}</p>", installStep.PostInstallInstructions );
                 }
             }
+            else
+            {
+                lMessages.Text = "<div class='alert alert-warning margin-t-md'><strong>Error</strong> Install package was not valid. Please try again later.";
+            }
         }
-        
+
+        private void CleanUpPackage(string packageFile)
+        {
+            try
+            {
+                if ( File.Exists( packageFile ) )
+                {
+                    File.Delete( packageFile );
+                }
+
+            } catch(Exception ex){
+                lMessages.Text = string.Format( "<div class='alert alert-warning margin-t-md'><strong>Error Cleaning Up</strong> An error occurred while cleaning up after the install. <br><em>Error: {0}</em></div>", ex.Message );
+                return;
+            }
+        }
+
         private void DisplayPackageInfo()
         {
             string errorResponse = string.Empty;
