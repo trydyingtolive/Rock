@@ -757,6 +757,19 @@ namespace Rock.Web.UI.Controls
                         if ( stream != null )
                         {
                             var bitMap = new System.Drawing.Bitmap( stream );
+
+                            // if the image is bigger than 480, resize to avoid issues with large images
+                            if ( bitMap.Width > 480 || bitMap.Height > 480 )
+                            {
+                                string resizeParams = string.Format( "maxwidth={0}&maxheight={1}", 480, 480 );
+                                MemoryStream croppedAndResizedStream = new MemoryStream();
+                                ImageResizer.ResizeSettings resizeSettings = new ImageResizer.ResizeSettings( resizeParams );
+                                stream.Seek( 0, SeekOrigin.Begin );
+                                MemoryStream resizedStream = new MemoryStream();
+                                ImageResizer.ImageBuilder.Current.Build( stream, resizedStream, resizeSettings );
+                                bitMap = new System.Drawing.Bitmap( resizedStream );
+                            }
+
                             _imgCropSource.Width = bitMap.Width;
                             _imgCropSource.Height = bitMap.Height;
                         }
