@@ -126,6 +126,15 @@ namespace Rock.Model
         [DataMember]
         public int? GroupId { get; set; }
 
+        /// <summary>
+        /// Gets or sets the last payment reminder date time.
+        /// </summary>
+        /// <value>
+        /// The last payment reminder date time.
+        /// </value>
+        [DataMember]
+        public DateTime LastPaymentReminderDateTime { get; set; }
+
         #endregion
 
         #region Virtual Properties
