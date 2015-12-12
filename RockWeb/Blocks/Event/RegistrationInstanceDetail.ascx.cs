@@ -50,6 +50,7 @@ namespace RockWeb.Blocks.Event
     [LinkedPage( "Group Detail Page", "The page for viewing details about a group", true, "", "", 4)]
     [LinkedPage( "Content Item Page", "The page for viewing details about a content channel item", true, "", "", 5 )]
     [LinkedPage( "Transaction Detail Page", "The page for viewing details about a payment", true, "", "", 6 )]
+    [LinkedPage("Payment Reminder Page", "The page for manually sending payment reminders.", false, "", "", 7)]
     public partial class RegistrationInstanceDetail : Rock.Web.UI.RockBlock, IDetailBlock
     {
         #region Fields

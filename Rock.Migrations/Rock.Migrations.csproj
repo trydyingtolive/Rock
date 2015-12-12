@@ -60,6 +60,10 @@
     <Compile Include="Migrations\201512092207219_RegistrationPaymentReminders.Designer.cs">
       <DependentUpon>201512092207219_RegistrationPaymentReminders.cs</DependentUpon>
     </Compile>
+    <Compile Include="Migrations\201512092314125_RegNullableDate.cs" />
+    <Compile Include="Migrations\201512092314125_RegNullableDate.Designer.cs">
+      <DependentUpon>201512092314125_RegNullableDate.cs</DependentUpon>
+    </Compile>
     <Compile Include="Migrations\Version 4.0\Version 1.4.0\201511231212549_ClearPreviousMigrations4.cs" />
     <Compile Include="Migrations\Version 4.0\Version 1.4.0\201511231212549_ClearPreviousMigrations4.Designer.cs">
       <DependentUpon>201511231212549_ClearPreviousMigrations4.cs</DependentUpon>
@@ -1950,6 +1954,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Migrations\201512092207219_RegistrationPaymentReminders.resx">
       <DependentUpon>201512092207219_RegistrationPaymentReminders.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\201512092314125_RegNullableDate.resx">
+      <DependentUpon>201512092314125_RegNullableDate.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Migrations\Version 4.0\Version 1.4.0\201511231212549_ClearPreviousMigrations4.resx">
       <DependentUpon>201511231212549_ClearPreviousMigrations4.cs</DependentUpon>
