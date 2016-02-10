@@ -21,6 +21,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using DotLiquid;
 using Rock.Data;
@@ -45,29 +46,48 @@ namespace Rock
         /// <returns></returns>
         public static string lavaDebugInfo( this object lavaObject, RockContext rockContext = null, string preText = "", string postText = "" )
         {
-            //return liquidObject.LiquidizeChildren( 0, rockContext ).ToJson();
             StringBuilder lavaDebugPanel = new StringBuilder();
-            lavaDebugPanel.Append( "<div class='alert alert-info lava-debug'><h4>Lava Debug Info</h4>" );
-
-            lavaDebugPanel.Append( preText );
-
-            lavaDebugPanel.Append( "<p>Below is a listing of available merge fields for this block. Find out more on Lava at <a href='http://www.rockrms.com/lava' target='_blank'>rockrms.com/lava</a>." );
-
-            lavaDebugPanel.Append( formatLavaDebugInfo( lavaObject.LiquidizeChildren( 0, rockContext ) ) );
-
-            // Add a 'GlobalAttribute' entry if it wasn't part of the LavaObject
-            if ( !( lavaObject is IDictionary<string, object> ) || !( (IDictionary<string, object>)lavaObject ).Keys.Contains( "GlobalAttribute" ) )
+            CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+            Task task = Task.Factory.StartNew( () =>
             {
-                var globalAttributes = new Dictionary<string, object>();
-                globalAttributes.Add( "GlobalAttribute", Rock.Web.Cache.GlobalAttributesCache.GetMergeFields( null ) );
-                lavaDebugPanel.Append( formatLavaDebugInfo( globalAttributes.LiquidizeChildren( 0, rockContext ) ) );
+
+                //return liquidObject.LiquidizeChildren( 0, rockContext ).ToJson();
+                lavaDebugPanel.Append( "<div class='alert alert-info lava-debug'><h4>Lava Debug Info</h4>" );
+
+                lavaDebugPanel.Append( preText );
+
+                lavaDebugPanel.Append( "<p>Below is a listing of available merge fields for this block. Find out more on Lava at <a href='http://www.rockrms.com/lava' target='_blank'>rockrms.com/lava</a>." );
+
+                lavaDebugPanel.Append( formatLavaDebugInfo( lavaObject.LiquidizeChildren( cancellationTokenSource, 0, rockContext ) ) );
+
+                // Add a 'GlobalAttribute' entry if it wasn't part of the LavaObject
+                if ( !( lavaObject is IDictionary<string, object> ) || !( (IDictionary<string, object>)lavaObject ).Keys.Contains( "GlobalAttribute" ) )
+                {
+                    var globalAttributes = new Dictionary<string, object>();
+                    globalAttributes.Add( "GlobalAttribute", Rock.Web.Cache.GlobalAttributesCache.GetMergeFields( null ) );
+                    lavaDebugPanel.Append( formatLavaDebugInfo( globalAttributes.LiquidizeChildren(cancellationTokenSource, 0, rockContext ) ) );
+                }
+
+                lavaDebugPanel.Append( postText );
+
+                lavaDebugPanel.Append( "</div>" );
+
+                return lavaDebugPanel.ToString();
+            } );
+
+            
+            // limit the task of getting debug info to 30 seconds to minimize chance of killing the server
+            var maxWaitTime = new TimeSpan( 0, 0, 30 );
+            task.Wait( maxWaitTime );
+            if ( task.IsCompleted )
+            {
+                return lavaDebugPanel.ToString();
             }
-
-            lavaDebugPanel.Append( postText );
-
-            lavaDebugPanel.Append( "</div>" );
-
-            return lavaDebugPanel.ToString();
+            else
+            {
+                cancellationTokenSource.Cancel();
+                return "<div class='alert alert-danger lava-debug'><h4>Lava Debug Info</h4>Timeout getting Lava Debug Info</div>";
+            }
         }
 
         /// <summary>
@@ -78,11 +98,16 @@ namespace Rock
         /// <param name="rockContext">The rock context.</param>
         /// <param name="parentElement">The parent element.</param>
         /// <returns></returns>
-        private static object LiquidizeChildren( this object myObject, int levelsDeep = 0, RockContext rockContext = null, string parentElement = "" )
+        private static object LiquidizeChildren( this object myObject, CancellationTokenSource cancellationTokenSource, int levelsDeep = 0, RockContext rockContext = null, string parentElement = "" )
         {
             // Add protection for stack-overflow if property attributes are not set correctly resulting in child/parent objects being evaluated in loop
             levelsDeep++;
             if ( levelsDeep > 10 )
+            {
+                return string.Empty;
+            }
+
+            if ( cancellationTokenSource.IsCancellationRequested )
             {
                 return string.Empty;
             }
@@ -132,7 +157,7 @@ namespace Rock
                     {
                         try
                         {
-                            result.Add( propInfo.Name, propInfo.GetValue( myObject, null ).LiquidizeChildren( levelsDeep, rockContext ) );
+                            result.Add( propInfo.Name, propInfo.GetValue( myObject, null ).LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext ) );
                         }
                         catch ( Exception ex )
                         {
@@ -158,7 +183,7 @@ namespace Rock
                         {
                             try
                             {
-                                result.Add( propInfo.Name, propInfo.GetValue( myObject, null ).LiquidizeChildren( levelsDeep, rockContext, parentElement + "." + propName ) );
+                                result.Add( propInfo.Name, propInfo.GetValue( myObject, null ).LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext, parentElement + "." + propName ) );
                             }
                             catch ( Exception ex )
                             {
@@ -192,7 +217,7 @@ namespace Rock
                             object propValue = liquidObject[key];
                             if ( propValue != null )
                             {
-                                result.Add( key, propValue.LiquidizeChildren( levelsDeep, rockContext, parentElement + "." + key ) );
+                                result.Add( key, propValue.LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext, parentElement + "." + key ) );
                             }
                             else
                             {
@@ -241,7 +266,7 @@ namespace Rock
                 {
                     try
                     {
-                        result.Add( keyValue.Key, keyValue.Value.LiquidizeChildren( levelsDeep, rockContext, keyValue.Key ) );
+                        result.Add( keyValue.Key, keyValue.Value.LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext, keyValue.Key ) );
                     }
                     catch ( Exception ex )
                     {
@@ -261,7 +286,7 @@ namespace Rock
                 {
                     try
                     {
-                        result.Add( keyValue.Key, keyValue.Value.LiquidizeChildren( levelsDeep, rockContext, keyValue.Key ) );
+                        result.Add( keyValue.Key, keyValue.Value.LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext, keyValue.Key ) );
                     }
                     catch ( Exception ex )
                     {
@@ -293,7 +318,7 @@ namespace Rock
                 {
                     try
                     {
-                        result.Add( value.LiquidizeChildren( levelsDeep, rockContext, parentElement ) );
+                        result.Add( value.LiquidizeChildren( cancellationTokenSource, levelsDeep, rockContext, parentElement ) );
                     }
                     catch { }
                 }
